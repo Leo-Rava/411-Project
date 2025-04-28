@@ -6,6 +6,10 @@ from db import db
 from utils.logger import configure_logger
 from utils.api_utils import get_random
 
+import os
+
+
+api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
 
 logger = logging.getLogger(__name__)
 configure_logger(logger)
