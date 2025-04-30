@@ -1,4 +1,5 @@
 import logging
+import requests
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -31,12 +32,11 @@ class Stocks(db.Model):
     __tablename__ = "Stocks"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    artist = db.Column(db.String, nullable=False)
-    title = db.Column(db.String, nullable=False)
-    year = db.Column(db.Integer, nullable=False)
-    genre = db.Column(db.String, nullable=False)
-    duration = db.Column(db.Integer, nullable=False)
-    play_count = db.Column(db.Integer, nullable=False, default=0)
+    symbol = db.Column(db.String, nullable=False)
+    number_shares = db.Column(db.Integer, nullable=False)
+    purchase_price = db.Column(db.Float, nullable=False)  # Price per share
+    total_cost = db.Column(db.Float, nullable=False)      # Total cost at purchase
+
 
     def validate(self) -> None:
         """Validates the song instance before committing to the database.
@@ -44,254 +44,215 @@ class Stocks(db.Model):
         Raises:
             ValueError: If any required fields are invalid.
         """
-        if not self.artist or not isinstance(self.artist, str):
-            raise ValueError("Artist must be a non-empty string.")
-        if not self.title or not isinstance(self.title, str):
-            raise ValueError("Title must be a non-empty string.")
-        if not isinstance(self.year, int) or self.year <= 1900:
-            raise ValueError("Year must be an integer greater than 1900.")
-        if not self.genre or not isinstance(self.genre, str):
-            raise ValueError("Genre must be a non-empty string.")
-        if not isinstance(self.duration, int) or self.duration <= 0:
-            raise ValueError("Duration must be a positive integer.")
+        if not self.symbol or not isinstance(self.symbol, str):
+            raise ValueError("Stock must be a non-empty string.")
+        if not isinstance(self.number_shares, int) or self.number_shares <= 0:
+            raise ValueError("number_shares must be an integer > 0")
+    
+    ##################################################
+    ## Stocks Retrieval Functions
+    ##################################################
 
     @classmethod
-    def create_song(cls, artist: str, title: str, year: int, genre: str, duration: int) -> None:
+    def buy_stock(cls, symbol: str, number_shares: int) -> None:
         """
-        Creates a new song in the songs table using SQLAlchemy.
+        Buys a new stock in the stocks table using SQLAlchemy.
 
         Args:
-            artist (str): The artist's name.
-            title (str): The song title.
-            year (int): The year the song was released.
-            genre (str): The song genre.
-            duration (int): The duration of the song in seconds.
+            symbol (str): The stocks symbol.
+            number_shares (int): number of shares the user wishes to buy.
 
         Raises:
             ValueError: If any field is invalid or if a song with the same compound key already exists.
             SQLAlchemyError: For any other database-related issues.
         """
-        logger.info(f"Received request to create song: {artist} - {title} ({year})")
-
         try:
-            song = Songs(
-                artist=artist.strip(),
-                title=title.strip(),
-                year=year,
-                genre=genre.strip(),
-                duration=duration
-            )
-            song.validate()
-        except ValueError as e:
-            logger.warning(f"Validation failed: {e}")
-            raise
+            symbol = symbol.upper()
+            if number_shares <= 0:
+                raise ValueError("Number of shares must be greater than 0")
 
-        try:
-            # Check for existing song with same compound key (artist, title, year)
-            existing = Songs.query.filter_by(artist=artist.strip(), title=title.strip(), year=year).first()
-            if existing:
-                logger.error(f"Song already exists: {artist} - {title} ({year})")
-                raise ValueError(f"Song with artist '{artist}', title '{title}', and year {year} already exists.")
+            # Lookup price using Alpha Vantage
+            stock_info = cls.get_stock_price(symbol)
+            price = stock_info["price"]
+            total_cost = price * number_shares
 
-            db.session.add(song)
+            # Check if stock already exists
+            stock = cls.query.filter_by(symbol=symbol).first()
+            if stock:
+                # Average cost update (optional: keep it simple here)
+                total_shares = stock.number_shares + number_shares
+                new_total_cost = stock.total_cost + total_cost
+                new_avg_price = new_total_cost / total_shares
+
+                stock.number_shares = total_shares
+                stock.total_cost = new_total_cost
+                stock.purchase_price = new_avg_price
+            else:
+                new_stock = cls(
+                    symbol=symbol,
+                    number_shares=number_shares,
+                    purchase_price=price,
+                    total_cost=total_cost
+                )
+                new_stock.validate()
+                db.session.add(new_stock)
+
             db.session.commit()
-            logger.info(f"Song successfully added: {artist} - {title} ({year})")
+            logger.info(f"Bought {number_shares} shares of {symbol} at ${price:.2f} per share (Total: ${total_cost:.2f})")
 
-        except IntegrityError:
-            logger.error(f"Song already exists: {artist} - {title} ({year})")
+        except (ValueError, SQLAlchemyError) as e:
             db.session.rollback()
-            raise ValueError(f"Song with artist '{artist}', title '{title}', and year {year} already exists.")
-
-        except SQLAlchemyError as e:
-            logger.error(f"Database error while creating song: {e}")
-            db.session.rollback()
+            logger.error(f"Error buying stock {symbol}: {str(e)}")
             raise
 
     @classmethod
-    def delete_song(cls, song_id: int) -> None:
+    def sell_stock(cls, symbol: str, number_shares: int) -> None:
         """
-        Permanently deletes a song from the catalog by ID.
+        Permanently sells stock from the portfolio its symbol.
 
         Args:
-            song_id (int): The ID of the song to delete.
+            symbol (str): The symbol of the stock to sell
+            number_shares (int): Number of shares of specified stock to sell
 
         Raises:
-            ValueError: If the song with the given ID does not exist.
+            ValueError: If the stock with the given symbol does not exist.
             SQLAlchemyError: For any database-related issues.
         """
-        logger.info(f"Received request to delete song with ID {song_id}")
-
         try:
-            song = cls.query.get(song_id)
-            if not song:
-                logger.warning(f"Attempted to delete non-existent song with ID {song_id}")
-                raise ValueError(f"Song with ID {song_id} not found")
+            symbol = symbol.upper()
+            if number_shares <= 0:
+                raise ValueError("Number of shares must be greater than 0")
 
-            db.session.delete(song)
+            stock = cls.query.filter_by(symbol=symbol).first()
+            if not stock:
+                raise ValueError(f"No stock with symbol {symbol} found in portfolio")
+            
+            if stock.number_shares < number_shares:
+                raise ValueError(f"Cannot sell more shares than owned")
+            
+            # Lookup price using Alpha Vantage
+            stock_info = cls.get_stock_price(symbol)
+            price = stock_info["price"]
+            total_cost = price * number_shares
+
+            # Check if stock already exists
+            # Average cost update (optional: keep it simple here)
+            total_shares = stock.number_shares - number_shares
+            new_total_cost = stock.total_cost - total_cost
+            new_avg_price = new_total_cost / total_shares
+
+            stock.number_shares -= number_shares
+            stock.total_cost = new_total_cost
+            stock.purchase_price = new_avg_price
+            if stock.number_shares == 0:
+                db.session.delete(stock)
+
             db.session.commit()
-            logger.info(f"Successfully deleted song with ID {song_id}")
+            logger.info(f"Sold {number_shares} shares of {symbol} at ${price:.2f} per share (Total: ${total_cost:.2f})")
 
-        except SQLAlchemyError as e:
-            logger.error(f"Database error while deleting song with ID {song_id}: {e}")
+        except (ValueError, SQLAlchemyError) as e:
             db.session.rollback()
+            logger.error(f"Error selling stock {symbol}: {str(e)}")
             raise
 
-    @classmethod
-    def get_song_by_id(cls, song_id: int) -> "Songs":
-        """
-        Retrieves a song from the catalog by its ID.
-
-        Args:
-            song_id (int): The ID of the song to retrieve.
-
-        Returns:
-            Songs: The song instance corresponding to the ID.
-
-        Raises:
-            ValueError: If no song with the given ID is found.
-            SQLAlchemyError: If a database error occurs.
-        """
-        logger.info(f"Attempting to retrieve song with ID {song_id}")
-
-        try:
-            song = cls.query.get(song_id)
-
-            if not song:
-                logger.info(f"Song with ID {song_id} not found")
-                raise ValueError(f"Song with ID {song_id} not found")
-
-            logger.info(f"Successfully retrieved song: {song.artist} - {song.title} ({song.year})")
-            return song
-
-        except SQLAlchemyError as e:
-            logger.error(f"Database error while retrieving song by ID {song_id}: {e}")
-            raise
 
     @classmethod
-    def get_song_by_compound_key(cls, artist: str, title: str, year: int) -> "Songs":
-        """
-        Retrieves a song from the catalog by its compound key (artist, title, year).
-
-        Args:
-            artist (str): The artist of the song.
-            title (str): The title of the song.
-            year (int): The year the song was released.
-
-        Returns:
-            Songs: The song instance matching the provided compound key.
-
-        Raises:
-            ValueError: If no matching song is found.
-            SQLAlchemyError: If a database error occurs.
-        """
-        logger.info(f"Attempting to retrieve song with artist '{artist}', title '{title}', and year {year}")
-
+    def look_up_stock(cls, symbol: str) -> dict:
         try:
-            song = cls.query.filter_by(artist=artist.strip(), title=title.strip(), year=year).first()
+            symbol = symbol.upper()
 
-            if not song:
-                logger.info(f"Song with artist '{artist}', title '{title}', and year {year} not found")
-                raise ValueError(f"Song with artist '{artist}', title '{title}', and year {year} not found")
-
-            logger.info(f"Successfully retrieved song: {song.artist} - {song.title} ({song.year})")
-            return song
-
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error while retrieving song by compound key "
-                f"(artist '{artist}', title '{title}', year {year}): {e}"
+            # Current price
+            quote_url = (
+                f"https://www.alphavantage.co/query"
+                f"?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
             )
+            quote_response = requests.get(quote_url)
+            quote_data = quote_response.json().get("Global Quote", {})
+
+            if "05. price" not in quote_data:
+                raise ValueError(f"No current price found for '{symbol}'.")
+
+            current_price = float(quote_data["05. price"])
+
+            # Company info
+            overview_url = (
+                f"https://www.alphavantage.co/query"
+                f"?function=OVERVIEW&symbol={symbol}&apikey={api_key}"
+            )
+            overview_response = requests.get(overview_url)
+            overview_data = overview_response.json()
+
+            if "Name" not in overview_data:
+                raise ValueError(f"No company info found for '{symbol}'.")
+
+            # Historical price data (last 7 days)
+            history_url = (
+                f"https://www.alphavantage.co/query"
+                f"?function=TIME_SERIES_DAILY_ADJUSTED&symbol={symbol}&apikey={api_key}"
+            )
+            history_response = requests.get(history_url)
+            history_data = history_response.json().get("Time Series (Daily)", {})
+
+            # Convert history to recent 7-day list of prices
+            recent_history = []
+            for date, daily_data in list(history_data.items())[:7]:
+                recent_history.append({
+                    "date": date,
+                    "open": float(daily_data["1. open"]),
+                    "high": float(daily_data["2. high"]),
+                    "low": float(daily_data["3. low"]),
+                    "close": float(daily_data["4. close"]),
+                    "volume": int(daily_data["6. volume"]),
+                })
+
+            return {
+                "symbol": symbol,
+                "name": overview_data.get("Name"),
+                "description": overview_data.get("Description"),
+                "sector": overview_data.get("Sector"),
+                "current_price": current_price,
+                "historical_prices": recent_history
+            }
+        except Exception as e:
+            logger.error(f"Error looking up stock {symbol}: {str(e)}")
             raise
 
+    ##################################################
+    ## Stocks Helper Functions
+    ##################################################
+
     @classmethod
-    def get_all_songs(cls, sort_by_play_count: bool = False) -> list[dict]:
+    def get_stock_price(cls, symbol: str) -> Stocks:
         """
-        Retrieves all songs from the catalog as dictionaries.
+        Provides details about specific stock from its symbol
 
         Args:
-            sort_by_play_count (bool): If True, sort the songs by play count in descending order.
+            symbol (str): Symbol of stock user wishes to look up
 
-        Returns:
-            list[dict]: A list of dictionaries representing all songs with play_count.
-
-        Raises:
-            SQLAlchemyError: If any database error occurs.
+        Raises: 
+            ValueError: If the stock with given symbol does not exist
+            SQLAlchemyError: For any database-related issues.
         """
-        logger.info("Attempting to retrieve all songs from the catalog")
-
         try:
-            query = cls.query
-            if sort_by_play_count:
-                query = query.order_by(cls.play_count.desc())
+            symbol = symbol.upper()
+            url = (
+                f"https://www.alphavantage.co/query"
+                f"?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
+            )
+            response = requests.get(url)
+            data = response.json()
 
-            songs = query.all()
+            quote = data.get("Global Quote")
+            if not quote or "05. price" not in quote:
+                raise ValueError(f"No price data found for symbol '{symbol}'.")
 
-            if not songs:
-                logger.warning("The song catalog is empty.")
-                return []
+            return {
+                "symbol": symbol,
+                "price": float(quote["05. price"]),
+                "volume": int(quote["06. volume"]),
+                "latest_trading_day": quote["07. latest trading day"],
+            }
 
-            results = [
-                {
-                    "id": song.id,
-                    "artist": song.artist,
-                    "title": song.title,
-                    "year": song.year,
-                    "genre": song.genre,
-                    "duration": song.duration,
-                    "play_count": song.play_count,
-                }
-                for song in songs
-            ]
-
-            logger.info(f"Retrieved {len(results)} songs from the catalog")
-            return results
-
-        except SQLAlchemyError as e:
-            logger.error(f"Database error while retrieving all songs: {e}")
-            raise
-
-    @classmethod
-    def get_random_song(cls) -> dict:
-        """
-        Retrieves a random song from the catalog as a dictionary.
-
-        Returns:
-            dict: A randomly selected song dictionary.
-        """
-        all_songs = cls.get_all_songs()
-
-        if not all_songs:
-            logger.warning("Cannot retrieve random song because the song catalog is empty.")
-            raise ValueError("The song catalog is empty.")
-
-        index = get_random(len(all_songs))
-        logger.info(f"Random index selected: {index} (total songs: {len(all_songs)})")
-
-        return all_songs[index - 1]
-
-    def update_play_count(self) -> None:
-        """
-        Increments the play count of the current song instance.
-
-        Raises:
-            ValueError: If the song does not exist in the database.
-            SQLAlchemyError: If any database error occurs.
-        """
-
-        logger.info(f"Attempting to update play count for song with ID {self.id}")
-
-        try:
-            song = Songs.query.get(self.id)
-            if not song:
-                logger.warning(f"Cannot update play count: Song with ID {self.id} not found.")
-                raise ValueError(f"Song with ID {self.id} not found")
-
-            song.play_count += 1
-            db.session.commit()
-
-            logger.info(f"Play count incremented for song with ID: {self.id}")
-
-        except SQLAlchemyError as e:
-            logger.error(f"Database error while updating play count for song with ID {self.id}: {e}")
-            db.session.rollback()
+        except Exception as e:
+            logger.error(f"Error looking up stock {symbol}: {str(e)}")
             raise
