@@ -69,3 +69,43 @@ def test_withdraw_cash_exceeds_balance_raises(portfolio):
 def test_deposit_negative_cash_raises(portfolio):
     with pytest.raises(ValueError):
         portfolio.deposit_cash(-100)
+
+# Should work even with just cash and 0 holdings
+def test_portfolio_with_only_cash():
+    model = PortfolioModel()
+    model.deposit_cash(1000.0)
+    result = model.calculate_portfolio_value()
+
+    assert result["current_total_value"] == 1000.0
+    assert result["original_total_value"] == 1000.0
+    assert result["percent_change"] == 0.0
+
+# No cash, No holdings
+def test_portfolio_with_zero_original_value():
+    model = PortfolioModel()
+    result = model.calculate_portfolio_value()
+
+    assert result["current_total_value"] == 0.0
+    assert result["original_total_value"] == 0.0
+    assert result["percent_change"] == 0.0 
+
+# Invalid stock ticker look up
+def test_stock_price_fetch_failure(portfolio, mocker):
+    mocker.patch(
+        "stockapp.models.portfolio_model.PortfolioModel._get_stock_from_cache_or_db",
+        side_effect=Exception("API error")
+    )
+    result = portfolio.calculate_portfolio_value()
+
+    # Should gracefully handle the error and still return cash-only value
+    assert result["current_total_value"] == 1000.0
+
+# Simulating broken entry with 0 share holding
+def test_zero_shares_in_holding(portfolio, mock_price_cache):
+    portfolio.holdings["GOOG"] = {"shares": 0, "buy_price": 100.0}
+    result = portfolio.view_portfolio()
+    
+    goog = next((item for item in result["portfolio"] if item["symbol"] == "GOOG"), None)
+    assert goog is not None
+    assert goog["total_value"] == 0.0
+    assert goog["shares"] == 0
