@@ -136,7 +136,7 @@ class PortfolioModel:
         }
 
     ##################################################
-    # Internal Helper Functions
+    ## Internal Helper Functions
     ##################################################
 
     def _get_stock_from_cache_or_db(self, symbol: str) -> float:
@@ -185,6 +185,10 @@ class PortfolioModel:
         current_price = self._get_stock_from_cache_or_db(symbol)
         return shares * current_price
 
+
+    ##################################################
+    ## Cash Balance Functions
+    ##################################################
 
     def deposit_cash(self, amount: float) -> None:
         """
