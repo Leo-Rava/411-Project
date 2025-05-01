@@ -63,7 +63,29 @@ class PortfolioModel:
             Dict: A structured summary of the user's portfolio, including
                   ticker, shares, current price, and percent change for each holding
         """
-        pass
+        summary = []
+
+        for symbol, info in self.holdings.items():
+            shares = info["shares"]
+            buy_price = info["buy_price"]
+
+            try:
+                current_price = self._get_stock_from_cache_or_db(symbol)
+                percent_change = ((current_price - buy_price) / buy_price) * 100
+            except Exception:
+                current_price = None
+                percent_change = None
+
+            summary.append({
+                "symbol": symbol,
+                "shares": shares,
+                "buy_price": round(buy_price, 2),
+                "current_price": round(current_price, 2) if current_price else "N/A",
+                "percent_change": round(percent_change, 2) if percent_change else "N/A"
+            })
+
+        return {"portfolio": summary}
+
 
     def calculate_portfolio_value(self) -> Dict:
         """
@@ -89,7 +111,7 @@ class PortfolioModel:
     # Internal Helper Functions
     ##################################################
 
-    def _get_stock_from_cache_or_db(self, symbol: str) -> Stocks:
+    def _get_stock_from_cache_or_db(self, symbol: str) -> float:
         """
         Retrieves a stock either from the internal cache or from the database.
 
@@ -99,7 +121,28 @@ class PortfolioModel:
         Returns:
             Stocks: The stock object with current price information.
         """
-        pass
+        now = time.time()
+
+        # Uses cached price if still valid
+        if symbol in self._stock_cache and self._ttl.get(symbol, 0) > now:
+            logger.debug(f"{symbol} price fetched from cache")
+            return self._stock_cache[symbol]
+
+        try:
+            stock_data = Stocks.get_stock_price(symbol)
+            current_price = stock_data["price"]
+
+            # Cache it
+            self._stock_cache[symbol] = current_price
+            self._ttl[symbol] = now + self.ttl_seconds
+
+            logger.info(f"{symbol} price fetched from API: ${current_price}")
+            return current_price
+
+        except Exception as e:
+            logger.error(f"Error fetching stock price for {symbol}: {e}")
+            raise
+
 
     def _refresh_stock_cache(self, symbol: str) -> None:
         """
