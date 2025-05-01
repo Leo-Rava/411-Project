@@ -1,7 +1,6 @@
 from dotenv import load_dotenv
 from flask import Flask, jsonify, make_response, Response, request
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-# from flask_cors import CORS
 
 from config import ProductionConfig
 
@@ -13,8 +12,6 @@ from stockapp.utils.logger import configure_logger
 
 
 load_dotenv()
-
-user_portfolios = {}
 
 def create_app(config_class=ProductionConfig):
     app = Flask(__name__)
@@ -41,16 +38,13 @@ def create_app(config_class=ProductionConfig):
             "message": "Authentication required"
         }), 401)
 
-
-    PortfolioModel= PortfolioModel()
-
+    portfolio_model = PortfolioModel()
 
     ####################################################
     #
     # Healthchecks
     #
     ####################################################
-
 
     @app.route('/api/health', methods=['GET'])
     def healthcheck() -> Response:
@@ -59,14 +53,12 @@ def create_app(config_class=ProductionConfig):
 
         Returns:
             JSON response indicating the health status of the service.
-
         """
         app.logger.info("Health check endpoint hit")
         return make_response(jsonify({
             'status': 'success',
             'message': 'Service is running'
         }), 200)
-
 
     ##########################################################
     #
@@ -177,7 +169,6 @@ def create_app(config_class=ProductionConfig):
 
         Returns:
             JSON response indicating the success of the logout operation.
-
         """
         logout_user()
         return make_response(jsonify({
@@ -265,71 +256,356 @@ def create_app(config_class=ProductionConfig):
     #
     ##########################################################
 
-    def get_user_portfolio():
-        if current_user.username not in user_portfolios:
-            user_portfolios[current_user.username] = PortfolioModel()
-            return user_portfolios[current_user.username]
+    @app.route('/api/reset-stocks', methods=['DELETE'])
+    def reset_stocks() -> Response:
+        """Recreate the stocks table to delete stocks.
 
-    @app.route('/api/deposite', methods=['POST'])
-    @login_required
-    def deposit_cash():
-        data = request.get_json()
-        amount = data.get("amount")
-        if not amount or amount <= 0:
-            return jsonify({"status": "error", "message": "Invalid deposit amount"}), 400
+        Returns:
+            JSON response indicating the success of recreating the Stocks table.
 
-        portfolio = get_user_portfolio()
-        portfolio.deposit_cash(amount)
-        return jsonify({"status": "success", "cash_balance": portfolio.cash_balance}), 200
-
-    @app.route('/api/portfolio', methods=['GET'])
-    @login_required
-    def view_portfolio():
-        portfolio = get_user_portfolio()
-        return jsonify(portfolio.view_portfolio()), 200
-
-    @app.route('/api/portfolio/summary', methods=['GET'])
-    @login_required
-    def portfolio_summary():
-        portfolio = get_user_portfolio()
-        return jsonify(portfolio.calculate_portfolio_value()), 200
-
-    @app.route('/api/buy', methods=['POST'])
-    @login_required
-    def buy_stock():    
-        data = request.get_json()
-        symbol = data.get("symbol")
-        shares = data.get("shares")
-
-        if not symbol or not shares or shares <= 0:
-            return jsonify({"status": "error", "message": "Invalid stock data"}), 400
-
+        Raises:
+            500 error if there is an issue recreating the Stocks table.
+        """
         try:
-            portfolio = get_user_portfolio()
-            portfolio = Stocks.buy_stock(symbol, shares, portfolio)
-            return jsonify({"status": "success", "message": f"Bought {shares} of {symbol}"}), 200
-        except Exception as e:
-            return jsonify({"status": "error", "message": str(e)}), 400
+            app.logger.info("Received request to recreate Stocks table")
+            with app.app_context():
+                Stocks.__table__.drop(db.engine)
+                Stocks.__table__.create(db.engine)
+            app.logger.info("Stocks table recreated successfully")
+            return make_response(jsonify({
+                "status": "success",
+                "message": f"Stocks table recreated successfully"
+            }), 200)
 
-    @app.route('/api/sell', methods=['POST'])
+        except Exception as e:
+            app.logger.error(f"Stocks table recreation failed: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while deleting stocks",
+                "details": str(e)
+            }), 500)
+
+    @app.route('/api/lookup-stock/<string:symbol>', methods=['GET'])
     @login_required
-    def sell_stock():
-        data = request.get_json()
-        symbol = data.get("symbol")
-        shares = data.get("shares")
+    def lookup_stock(symbol: str) -> Response:
+        """Route to look up stock information by symbol.
 
-        if not symbol or not shares or shares <= 0:
-            return jsonify({"status": "error", "message": "Invalid stock data"}), 400
+        Path Parameter:
+            - symbol (str): The stock symbol to look up.
 
+        Returns:
+            JSON response containing the stock details if found.
+
+        Raises:
+            400 error if the stock is not found.
+            500 error if there is an issue retrieving the stock information.
+        """
         try:
-            portfolio = get_user_portfolio()
-            portfolio = Stocks.sell_stock(symbol, shares, portfolio)
-            return jsonify({"status": "success", "message": f"Sold {shares} of {symbol}"}), 200
-        except Exception as e:
-            return jsonify({"status": "error", "message": str(e)}), 400
+            app.logger.info(f"Received request to look up stock with symbol '{symbol}'")
 
-        return app
+            stock_info = Stocks.look_up_stock(symbol)
+
+            app.logger.info(f"Successfully retrieved stock info for {symbol}")
+            return make_response(jsonify({
+                "status": "success",
+                "stock": stock_info
+            }), 200)
+
+        except ValueError as e:
+            app.logger.warning(f"Stock lookup failed for {symbol}: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 400)
+        except Exception as e:
+            app.logger.error(f"Error looking up stock {symbol}: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while looking up the stock",
+                "details": str(e)
+            }), 500)
+
+    ############################################################
+    #
+    # Portfolio
+    #
+    ############################################################
+
+    @app.route('/api/deposit-cash', methods=['POST'])
+    @login_required
+    def deposit_cash() -> Response:
+        """Route to deposit cash into the portfolio.
+
+        Expected JSON Input:
+            - amount (float): The amount to deposit.
+
+        Returns:
+            JSON response indicating the success of the deposit.
+
+        Raises:
+            400 error if the amount is invalid.
+            500 error if there is an issue processing the deposit.
+        """
+        try:
+            data = request.get_json()
+            amount = data.get("amount")
+
+            if not amount or amount <= 0:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Amount must be a positive number"
+                }), 400)
+
+            portfolio_model.deposit_cash(float(amount))
+            return make_response(jsonify({
+                "status": "success",
+                "message": f"Successfully deposited ${amount:.2f}",
+                "new_balance": portfolio_model.cash_balance
+            }), 200)
+
+        except ValueError as e:
+            return make_response(jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 400)
+        except Exception as e:
+            app.logger.error(f"Error depositing cash: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while processing deposit",
+                "details": str(e)
+            }), 500)
+
+    @app.route('/api/withdraw-cash', methods=['POST'])
+    @login_required
+    def withdraw_cash() -> Response:
+        """Route to withdraw cash from the portfolio.
+
+        Expected JSON Input:
+            - amount (float): The amount to withdraw.
+
+        Returns:
+            JSON response indicating the success of the withdrawal.
+
+        Raises:
+            400 error if the amount is invalid or exceeds balance.
+            500 error if there is an issue processing the withdrawal.
+        """
+        try:
+            data = request.get_json()
+            amount = data.get("amount")
+
+            if not amount or amount <= 0:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Amount must be a positive number"
+                }), 400)
+
+            portfolio_model.withdraw_cash(float(amount))
+            return make_response(jsonify({
+                "status": "success",
+                "message": f"Successfully withdrew ${amount:.2f}",
+                "new_balance": portfolio_model.cash_balance
+            }), 200)
+
+        except ValueError as e:
+            return make_response(jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 400)
+        except Exception as e:
+            app.logger.error(f"Error withdrawing cash: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while processing withdrawal",
+                "details": str(e)
+            }), 500)
+
+    @app.route('/api/buy-stock', methods=['POST'])
+    @login_required
+    def buy_stock() -> Response:
+        """Route to buy a stock and add it to the portfolio.
+
+        Expected JSON Input:
+            - symbol (str): The stock symbol to buy.
+            - shares (int): The number of shares to buy.
+
+        Returns:
+            JSON response indicating the success of the purchase.
+
+        Raises:
+            400 error if the input is invalid or insufficient funds.
+            500 error if there is an issue processing the purchase.
+        """
+        try:
+            data = request.get_json()
+            symbol = data.get("symbol")
+            shares = data.get("shares")
+
+            if not symbol or not shares:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Symbol and shares are required"
+                }), 400)
+
+            if shares <= 0:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Shares must be a positive number"
+                }), 400)
+
+            # Get current price
+            stock_info = Stocks.get_stock_price(symbol)
+            total_cost = stock_info["price"] * shares
+
+            # Check if user has enough cash
+            if total_cost > portfolio_model.cash_balance:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Insufficient funds for this purchase"
+                }), 400)
+
+            # Process the purchase
+            Stocks.buy_stock(symbol, shares)
+            portfolio_model.withdraw_cash(total_cost)
+
+            # Update holdings in portfolio model
+            if symbol in portfolio_model.holdings:
+                portfolio_model.holdings[symbol]["shares"] += shares
+            else:
+                portfolio_model.holdings[symbol] = {
+                    "shares": shares,
+                    "buy_price": stock_info["price"]
+                }
+
+            return make_response(jsonify({
+                "status": "success",
+                "message": f"Successfully bought {shares} shares of {symbol} at ${stock_info['price']:.2f} per share",
+                "total_cost": total_cost,
+                "remaining_balance": portfolio_model.cash_balance
+            }), 200)
+
+        except ValueError as e:
+            return make_response(jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 400)
+        except Exception as e:
+            app.logger.error(f"Error buying stock: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while processing purchase",
+                "details": str(e)
+            }), 500)
+
+    @app.route('/api/sell-stock', methods=['POST'])
+    @login_required
+    def sell_stock() -> Response:
+        """Route to sell a stock from the portfolio.
+
+        Expected JSON Input:
+            - symbol (str): The stock symbol to sell.
+            - shares (int): The number of shares to sell.
+
+        Returns:
+            JSON response indicating the success of the sale.
+
+        Raises:
+            400 error if the input is invalid or insufficient shares.
+            500 error if there is an issue processing the sale.
+        """
+        try:
+            data = request.get_json()
+            symbol = data.get("symbol")
+            shares = data.get("shares")
+
+            if not symbol or not shares:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Symbol and shares are required"
+                }), 400)
+
+            if shares <= 0:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": "Shares must be a positive number"
+                }), 400)
+
+            # Check if user owns enough shares
+            if symbol not in portfolio_model.holdings or portfolio_model.holdings[symbol]["shares"] < shares:
+                return make_response(jsonify({
+                    "status": "error",
+                    "message": f"You don't own enough shares of {symbol} to sell"
+                }), 400)
+
+            # Get current price
+            stock_info = Stocks.get_stock_price(symbol)
+            total_proceeds = stock_info["price"] * shares
+
+            # Process the sale
+            Stocks.sell_stock(symbol, shares)
+            portfolio_model.deposit_cash(total_proceeds)
+
+            # Update holdings in portfolio model
+            portfolio_model.holdings[symbol]["shares"] -= shares
+            if portfolio_model.holdings[symbol]["shares"] == 0:
+                del portfolio_model.holdings[symbol]
+
+            return make_response(jsonify({
+                "status": "success",
+                "message": f"Successfully sold {shares} shares of {symbol} at ${stock_info['price']:.2f} per share",
+                "total_proceeds": total_proceeds,
+                "new_balance": portfolio_model.cash_balance
+            }), 200)
+
+        except ValueError as e:
+            return make_response(jsonify({
+                "status": "error",
+                "message": str(e)
+            }), 400)
+        except Exception as e:
+            app.logger.error(f"Error selling stock: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while processing sale",
+                "details": str(e)
+            }), 500)
+
+    @app.route('/api/view-portfolio', methods=['GET'])
+    @login_required
+    def view_portfolio() -> Response:
+        """Route to view the current portfolio holdings and value.
+
+        Returns:
+            JSON response containing the portfolio details and valuation.
+        """
+        try:
+            portfolio_summary = portfolio_model.view_portfolio()
+            portfolio_value = portfolio_model.calculate_portfolio_value()
+
+            return make_response(jsonify({
+                "status": "success",
+                "holdings": portfolio_summary,
+                "portfolio_value": portfolio_value,
+                "cash_balance": portfolio_model.cash_balance
+            }), 200)
+
+        except Exception as e:
+            app.logger.error(f"Error viewing portfolio: {e}")
+            return make_response(jsonify({
+                "status": "error",
+                "message": "An internal error occurred while retrieving portfolio",
+                "details": str(e)
+            }), 500)
+
+    return app
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.logger.info("Starting Flask app...")
+    try:
+        app.run(debug=True, host='0.0.0.0', port=5000)
+    except Exception as e:
+        app.logger.error(f"Flask app encountered an error: {e}")
+    finally:
+        app.logger.info("Flask app has stopped.")
