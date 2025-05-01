@@ -107,17 +107,8 @@ def test_real_commit(app, session):
 
 def test_buy_stock_updates_portfolio(app, session, mock_stock_price):
     with app.app_context():
-        # Set up portfolio
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 1000.0
-        portfolio.holdings = {}
-
         # Buy stock
-        Stocks.buy_stock("AAPL", 5, portfolio)
-
-        # Validate portfolio updated
-        assert portfolio.cash_balance == 500.0
-        assert portfolio.holdings["AAPL"] == 5
+        Stocks.buy_stock("AAPL", 5)
 
         # Validate stock persisted to DB
         stock = Stocks.query.filter_by(symbol="AAPL").first()
@@ -126,20 +117,12 @@ def test_buy_stock_updates_portfolio(app, session, mock_stock_price):
 
 def test_sell_stock_updates_portfolio(app, session, mock_stock_price):
     with app.app_context():
-        # Setup: Buy stock first
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 600.0
-        portfolio.holdings = {}
-
-        Stocks.buy_stock("AAPL", 5, portfolio)
-        assert portfolio.holdings["AAPL"] == 5
+        Stocks.buy_stock("AAPL", 5)
 
         # Act: Sell 2 shares
-        Stocks.sell_stock("AAPL", 2, portfolio)
+        Stocks.sell_stock("AAPL", 2)
 
-        # Validate portfolio and DB updated
-        assert portfolio.holdings["AAPL"] == 3
-        assert round(portfolio.cash_balance, 2) == 300.0  # bought for 500, sold 2x100
+        # Validate DB updated
 
         stock = Stocks.query.filter_by(symbol="AAPL").first()
         assert stock is not None
@@ -147,65 +130,36 @@ def test_sell_stock_updates_portfolio(app, session, mock_stock_price):
 
 def test_sell_more_than_owned_raises(app, session, mock_stock_price):
     with app.app_context():
-        # Setup: Buy 3 shares
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 500.0
-        portfolio.holdings = {}
 
-        Stocks.buy_stock("AAPL", 3, portfolio)
-        assert portfolio.holdings["AAPL"] == 3
+        Stocks.buy_stock("AAPL", 3)
 
         # Attempt to oversell
         with pytest.raises(ValueError, match="Cannot sell more shares than owned"):
-            Stocks.sell_stock("AAPL", 5, portfolio)
-
-def test_buy_stock_insufficient_cash_raises(app, session, mock_stock_price):
-    with app.app_context():
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 100.0  # Not enough to buy 5 shares at $100
-        portfolio.holdings = {}
-
-        with pytest.raises(ValueError, match="Cannot buy stock with less cash than owned"):
-            Stocks.buy_stock("AAPL", 5, portfolio)
+            Stocks.sell_stock("AAPL", 5)
 
 def test_sell_stock_not_owned_raises(app, session, mock_stock_price):
     with app.app_context():
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 500.0
-        portfolio.holdings = {}
-
         with pytest.raises(ValueError, match="Cannot sell stock you don't own"):
-            Stocks.sell_stock("AAPL", 1, portfolio)
-
-
+            Stocks.sell_stock("AAPL", 1)
 
 def test_buy_existing_stock_accumulates(app, session, mock_stock_price):
     with app.app_context():
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 1000.0
-        portfolio.holdings = {}
 
-        Stocks.buy_stock("AAPL", 3, portfolio)
-        Stocks.buy_stock("AAPL", 2, portfolio)
+        Stocks.buy_stock("AAPL", 3)
+        Stocks.buy_stock("AAPL", 2)
 
         stock = Stocks.query.filter_by(symbol="AAPL").first()
 
         assert stock.number_shares == 5
-        assert round(portfolio.cash_balance, 2) == 500.0
-        assert portfolio.holdings["AAPL"] == 5
 
 def test_sell_all_shares_deletes_stock(app, session, mock_stock_price):
     with app.app_context():
-        portfolio = PortfolioModel()
-        portfolio.cash_balance = 500.0
-        portfolio.holdings = {}
 
-        Stocks.buy_stock("AAPL", 5, portfolio)
-        Stocks.sell_stock("AAPL", 5, portfolio)
+        Stocks.buy_stock("AAPL", 5)
+        Stocks.sell_stock("AAPL", 5)
 
         stock = Stocks.query.filter_by(symbol="AAPL").first()
         assert stock is None
-        assert "AAPL" in portfolio.holdings and portfolio.holdings["AAPL"] == 0
 
 def test_lookup_invalid_stock_symbol_raises(mocker):
     mocker.patch("stockapp.models.stock_model.requests.get", return_value=mocker.Mock(json=lambda: {}))
