@@ -81,7 +81,8 @@ class PortfolioModel:
                 "shares": shares,
                 "buy_price": round(buy_price, 2),
                 "current_price": round(current_price, 2) if current_price else "N/A",
-                "percent_change": round(percent_change, 2) if percent_change else "N/A"
+                "percent_change": round(percent_change, 2) if percent_change else "N/A",
+                "total_value": round(self._calculate_stock_value(symbol, shares), 2)
             })
 
         return {"portfolio": summary}
@@ -105,7 +106,32 @@ class PortfolioModel:
             - original_total_value (float): Original invested amount + cash
             - percent_change (float): Percentage change from original value
         """
-        pass
+        total_current_value = 0.0
+        total_original_value = self.original_cash_balance
+
+        for symbol, info in self.holdings.items():
+            shares = info["shares"]
+            buy_price = info["buy_price"]
+            total_original_value += shares * buy_price
+
+            try:
+                stock_value = self._calculate_stock_value(symbol, shares)
+                total_current_value += stock_value
+            except Exception as e:
+                logger.warning(f"Skipping {symbol} due to price fetch error: {e}")
+
+        total_current_value += self.cash_balance
+
+        try:
+            percent_change = ((total_current_value - total_original_value) / total_original_value) * 100 if total_original_value > 0 else 0.0
+        except ZeroDivisionError:
+            percent_change = 0.0
+
+        return {
+            "current_total_value": round(total_current_value, 2),
+            "original_total_value": round(total_original_value, 2),
+            "percent_change": round(percent_change, 2)
+        }
 
     ##################################################
     # Internal Helper Functions
@@ -143,16 +169,6 @@ class PortfolioModel:
             logger.error(f"Error fetching stock price for {symbol}: {e}")
             raise
 
-
-    def _refresh_stock_cache(self, symbol: str) -> None:
-        """
-        Refreshes the cached stock information if the TTL has expired.
-
-        Args:
-            symbol (str): The stock symbol to refresh.
-        """
-        pass
-
     def _calculate_stock_value(self, symbol: str, shares: int) -> float:
         """
         Calculates the total value of a given stock holding.
@@ -164,7 +180,8 @@ class PortfolioModel:
         Returns:
             float: The total value of the holding.
         """
-        pass
+        current_price = self._get_stock_from_cache_or_db(symbol)
+        return shares * current_price
 
 
     def deposit_cash(self, amount: float) -> None:
@@ -180,7 +197,12 @@ class PortfolioModel:
         Raises:
             ValueError: If the amount is not a positive number
         """
-        pass
+        if amount <= 0:
+            raise ValueError("Deposit amount must be a positive number.")
+    
+        self.cash_balance += amount
+        self.original_cash_balance += amount
+        logger.info(f"Deposited ${amount:.2f}. New balance: ${self.cash_balance:.2f}")
 
     def withdraw_cash(self, amount: float) -> None:
         """
@@ -195,4 +217,11 @@ class PortfolioModel:
         Raises:
             ValueError: If the amount is not positive or exceeds the current cash balance
         """
-        pass
+        if amount <= 0:
+            raise ValueError("Withdrawal amount must be a positive number.")
+    
+        if amount > self.cash_balance:
+            raise ValueError("Withdrawal exceeds current cash balance.")
+    
+        self.cash_balance -= amount
+        logger.info(f"Withdrew ${amount:.2f}. Remaining balance: ${self.cash_balance:.2f}")
