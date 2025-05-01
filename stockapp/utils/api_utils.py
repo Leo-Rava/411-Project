@@ -2,7 +2,7 @@ import logging
 import os
 import requests
 
-from boxing.utils.logger import configure_logger
+from stockapp.utils.logger import configure_logger
 
 
 logger = logging.getLogger(__name__)

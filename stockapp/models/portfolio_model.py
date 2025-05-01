@@ -3,9 +3,9 @@ import os
 import time
 from typing import Dict
 
-from models.stock_model import Stocks
-from utils.logger import configure_logger
-from utils.api_utils import get_random
+from stockapp.models.stock_model import Stocks
+from stockapp.utils.logger import configure_logger
+from stockapp.utils.api_utils import get_random
 
 
 logger = logging.getLogger(__name__)

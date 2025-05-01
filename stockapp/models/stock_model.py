@@ -3,9 +3,9 @@ import requests
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from db import db
-from utils.logger import configure_logger
-from utils.api_utils import get_random
+from stockapp.db import db
+from stockapp.utils.logger import configure_logger
+from stockapp.utils.api_utils import get_random
 
 import os
 
@@ -222,7 +222,7 @@ class Stocks(db.Model):
     ##################################################
 
     @classmethod
-    def get_stock_price(cls, symbol: str) -> Stocks:
+    def get_stock_price(cls, symbol: str) -> dict:
         """
         Provides details about specific stock from its symbol
 
