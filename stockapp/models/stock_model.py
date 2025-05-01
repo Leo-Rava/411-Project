@@ -16,10 +16,6 @@ api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
 logger = logging.getLogger(__name__)
 configure_logger(logger)
 
-#   Note: I think looking at the playlist model would be best. It is most similar to what we
-#   are trying to do. 
-
-
 class Stocks(db.Model):
     """Represents a stock in the catalog.
 
@@ -69,6 +65,8 @@ class Stocks(db.Model):
         """
         if portfolio==None:
             portfolio = PortfolioModel()
+            
+        logger.info(f"Request recieved to buy {number_shares} shares of {symbol}")
 
         try:
             symbol = symbol.upper()
@@ -83,7 +81,7 @@ class Stocks(db.Model):
             if portfolio.cash_balance<total_cost:
                 raise ValueError(f"Cannot buy stock with less cash than owned")
             # Check if stock already exists
-            stock = cls.query.filter_by(symbol=symbol).first()
+            stock = Stocks.query.filter_by(symbol=symbol).first()
             if stock:
                 # Average cost update (optional: keep it simple here)
                 total_shares = stock.number_shares + number_shares
@@ -94,20 +92,27 @@ class Stocks(db.Model):
                 stock.total_cost = new_total_cost
                 stock.purchase_price = new_avg_price
 
-                portfolio.holdings[symbol: total_shares]
+                portfolio.holdings[symbol]=total_shares
                 portfolio.cash_balance -= total_cost
+
+                db.session.commit()
             else:
-                new_stock = cls(
-                    symbol=symbol,
-                    number_shares=number_shares,
-                    purchase_price=price,
-                    total_cost=total_cost
-                )
+                new_stock = Stocks()
+                new_stock.symbol=symbol
+                new_stock.number_shares=number_shares
+                new_stock.purchase_price=price
+                new_stock.total_cost=total_cost
+
+                portfolio.holdings[symbol] = new_stock.number_shares
+                portfolio.cash_balance -= new_stock.total_cost
+
                 new_stock.validate()
                 db.session.add(new_stock)
+                db.session.commit()
 
-            db.session.commit()
             logger.info(f"Bought {number_shares} shares of {symbol} at ${price:.2f} per share (Total: ${total_cost:.2f})")
+            print(Stocks.query.all())
+            print(Stocks.query.filter_by(symbol="AAPL").first())
 
         except (ValueError, SQLAlchemyError) as e:
             db.session.rollback()
@@ -127,21 +132,20 @@ class Stocks(db.Model):
             ValueError: If the stock with the given symbol does not exist.
             SQLAlchemyError: For any database-related issues.
         """
-       
+        logger.info(f"Request recieved to sell {number_shares} shares of {symbol}")   
         try:
             symbol = symbol.upper()
             if number_shares <= 0:
                 raise ValueError("Number of shares must be greater than 0")
-
-            stock = cls.query.filter_by(symbol=symbol).first()
-            if not stock:
-                raise ValueError(f"No stock with symbol {symbol} found in portfolio")
             
-            if stock.number_shares < number_shares:
+            if symbol not in portfolio.holdings:
+                raise ValueError(f"Cannot sell stock you don't own")
+
+            if portfolio.holdings[symbol] < number_shares:
                 raise ValueError(f"Cannot sell more shares than owned")
             
-            if portfolio.holdings[symbol] == 0:
-                raise ValueError(f"Cannot sell stock you do not have")
+            stock = Stocks.query.filter_by(symbol=symbol).first()
+
             # Lookup price using Alpha Vantage
             stock_info = cls.get_stock_price(symbol)
             price = stock_info["price"]
@@ -151,14 +155,18 @@ class Stocks(db.Model):
             # Average cost update (optional: keep it simple here)
             total_shares = stock.number_shares - number_shares
             new_total_cost = stock.total_cost - total_cost
-            new_avg_price = new_total_cost / total_shares
+            if total_shares == 0:
+                new_avg_price = 0
+            else:
+                new_avg_price = new_total_cost/total_shares
 
             stock.number_shares -= number_shares
             stock.total_cost = new_total_cost
             stock.purchase_price = new_avg_price
 
-            portfolio.holdings[symbol: total_shares]
+            portfolio.holdings[symbol] = total_shares
             portfolio.cash_balance += total_cost
+
             if stock.number_shares == 0:
                 db.session.delete(stock)
 
