@@ -3,7 +3,6 @@ import os
 import time
 from typing import Dict
 
-from stockapp.models.stock_model import Stocks
 from stockapp.utils.logger import configure_logger
 from stockapp.utils.api_utils import get_random
 
@@ -157,6 +156,7 @@ class PortfolioModel:
             return self._stock_cache[symbol]
 
         try:
+            from stockapp.models.stock_model import Stocks
             stock_data = Stocks.get_stock_price(symbol)
             current_price = stock_data["price"]
 
