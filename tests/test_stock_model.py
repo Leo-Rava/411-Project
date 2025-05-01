@@ -1,5 +1,6 @@
 import pytest
 from stockapp.models.stock_model import Stocks
+from stockapp.models.portfolio_model import PortfolioModel
 from stockapp.db import db
 
 
@@ -66,3 +67,35 @@ def test_look_up_stock_invalid_symbol_raises(mocker):
 
     with pytest.raises(ValueError, match="No current price found for 'AAPL'"):
         Stocks.look_up_stock("AAPL")
+
+def test_buy_stock_updates_portfolio(mock_stock_price, mock_commit, mock_add):
+    portfolio = PortfolioModel()
+    portfolio.cash_balance=1000.0
+    portfolio.holdings = {}
+
+    Stocks.buy_stock("AAPL", 5, portfolio)
+
+    assert portfolio.cash_balance == 500.0
+    assert portfolio.holdings["AAPL"] == 5
+
+def test_sell_stock_updates_portfolio(mock_stock_price, mock_commit, mock_add):
+    stock = Stocks(symbol="AAPL", number_shares=5, purchase_price=100.0, total_cost=500.0)
+
+    portfolio = PortfolioModel()
+    portfolio.cash_balance = 100.0
+    portfolio.holdings = {"AAPL": 5}
+
+    Stocks.sell_stock("AAPL", 2, portfolio)
+
+    assert portfolio.cash_balance == 300.0  # +200 from selling 2 shares at $100 each
+    assert portfolio.holdings["AAPL"] == 3
+
+def test_sell_more_than_owned_raises(mock_stock_price, mock_rollback):
+    stock = Stocks(symbol="AAPL", number_shares=3, purchase_price=100.0, total_cost=300.0)
+
+    portfolio = PortfolioModel()
+    portfolio.cash_balance=100.0
+    portfolio.holdings = {"AAPL": 3}
+
+    with pytest.raises(ValueError, match="Cannot sell more shares than owned"):
+        Stocks.sell_stock("AAPL", 5, portfolio)

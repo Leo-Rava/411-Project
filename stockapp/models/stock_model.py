@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from stockapp.db import db
 from stockapp.utils.logger import configure_logger
 from stockapp.utils.api_utils import get_random
+from stockapp.models.portfolio_model import PortfolioModel
 
 import os
 
@@ -54,7 +55,7 @@ class Stocks(db.Model):
     ##################################################
 
     @classmethod
-    def buy_stock(cls, symbol: str, number_shares: int) -> None:
+    def buy_stock(cls, symbol: str, number_shares: int, portfolio: PortfolioModel) -> None:
         """
         Buys a new stock in the stocks table using SQLAlchemy.
 
@@ -66,6 +67,9 @@ class Stocks(db.Model):
             ValueError: If any field is invalid or if a song with the same compound key already exists.
             SQLAlchemyError: For any other database-related issues.
         """
+        if portfolio==None:
+            portfolio = PortfolioModel()
+
         try:
             symbol = symbol.upper()
             if number_shares <= 0:
@@ -76,6 +80,8 @@ class Stocks(db.Model):
             price = stock_info["price"]
             total_cost = price * number_shares
 
+            if portfolio.cash_balance<total_cost:
+                raise ValueError(f"Cannot buy stock with less cash than owned")
             # Check if stock already exists
             stock = cls.query.filter_by(symbol=symbol).first()
             if stock:
@@ -87,6 +93,9 @@ class Stocks(db.Model):
                 stock.number_shares = total_shares
                 stock.total_cost = new_total_cost
                 stock.purchase_price = new_avg_price
+
+                portfolio.holdings[symbol: total_shares]
+                portfolio.cash_balance -= total_cost
             else:
                 new_stock = cls(
                     symbol=symbol,
@@ -106,7 +115,7 @@ class Stocks(db.Model):
             raise
 
     @classmethod
-    def sell_stock(cls, symbol: str, number_shares: int) -> None:
+    def sell_stock(cls, symbol: str, number_shares: int, portfolio: PortfolioModel) -> None:
         """
         Permanently sells stock from the portfolio its symbol.
 
@@ -118,6 +127,7 @@ class Stocks(db.Model):
             ValueError: If the stock with the given symbol does not exist.
             SQLAlchemyError: For any database-related issues.
         """
+       
         try:
             symbol = symbol.upper()
             if number_shares <= 0:
@@ -130,6 +140,8 @@ class Stocks(db.Model):
             if stock.number_shares < number_shares:
                 raise ValueError(f"Cannot sell more shares than owned")
             
+            if portfolio.holdings[symbol] == 0:
+                raise ValueError(f"Cannot sell stock you do not have")
             # Lookup price using Alpha Vantage
             stock_info = cls.get_stock_price(symbol)
             price = stock_info["price"]
@@ -144,6 +156,9 @@ class Stocks(db.Model):
             stock.number_shares -= number_shares
             stock.total_cost = new_total_cost
             stock.purchase_price = new_avg_price
+
+            portfolio.holdings[symbol: total_shares]
+            portfolio.cash_balance += total_cost
             if stock.number_shares == 0:
                 db.session.delete(stock)
 
