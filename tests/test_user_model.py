@@ -1,5 +1,5 @@
 import pytest
-from boxing.models.user_model import Users
+from stockapp.models.user_model import Users
 
 @pytest.fixture
 def sample_user():
