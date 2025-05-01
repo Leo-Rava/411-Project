@@ -72,9 +72,11 @@ class PortfolioModel:
             try:
                 current_price = self._get_stock_from_cache_or_db(symbol)
                 percent_change = ((current_price - buy_price) / buy_price) * 100
+                total_value = round(self._calculate_stock_value(symbol, shares), 2)
             except Exception:
                 current_price = None
                 percent_change = None
+                total_value = "N/A"
 
             summary.append({
                 "symbol": symbol,
@@ -82,7 +84,7 @@ class PortfolioModel:
                 "buy_price": round(buy_price, 2),
                 "current_price": round(current_price, 2) if current_price else "N/A",
                 "percent_change": round(percent_change, 2) if percent_change else "N/A",
-                "total_value": round(self._calculate_stock_value(symbol, shares), 2)
+                "total_value": total_value
             })
 
         return {"portfolio": summary}
@@ -145,7 +147,7 @@ class PortfolioModel:
             symbol (str): The stock symbol to retrieve.
 
         Returns:
-            Stocks: The stock object with current price information.
+            float: The current stock price
         """
         now = time.time()
 
