@@ -1,4 +1,10 @@
-Description:
+Description: A RESTful API for managing stock portfolios with user authentication, stock trading, and portfolio tracking capabilities.
+This API provides a complete solution for:
+- User account creation and authentication
+- Stock lookup and trading
+- Portfolio management including buying/selling stocks
+- Cash deposit/withdrawal functionality
+- Portfolio valuation and performance tracking
 
 List of all routes:
 - Route: ```/create-account```
