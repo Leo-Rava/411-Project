@@ -7,17 +7,17 @@ WORKDIR /app
 # Copy project files into the container
 COPY . /app
 
-# Install SQLite3 and pip
-RUN apt-get update && apt-get install -y sqlite3 python3-pip
-
 # Install dependencies
 RUN pip install -r requirements.txt
+
+# Install SQLite3 and pip
+RUN apt-get update && apt-get install -y sqlite3 python3-pip
 
 # Create volume for persistent DB storage
 VOLUME ["/app/db"]
 
 # Expose Flask port
-EXPOSE 5000
+EXPOSE 5001
 
 # Run the app
 CMD ["python", "app.py"]
