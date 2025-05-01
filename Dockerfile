@@ -1,29 +1,23 @@
-# Use an official Python runtime as a parent image
+# Use an official Python runtime
 FROM python:3.9-slim
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
+# Copy project files into the container
 COPY . /app
 
-# Copy the env file to the container
-# COPY .env /app/.env
+# Install SQLite3 and pip
+RUN apt-get update && apt-get install -y sqlite3 python3-pip
 
-# Install any needed packages specified in requirements.txt
-# In production, you would want to ensure that any re-compiled packages
-# With the same version number are re-downloaded
-# RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies
 RUN pip install -r requirements.txt
 
-# Install SQLite3
-RUN apt-get update && apt-get install -y sqlite3
-
-# Define a volume for persisting the database
+# Create volume for persistent DB storage
 VOLUME ["/app/db"]
 
-# Make port 5000 available to the world outside this container
+# Expose Flask port
 EXPOSE 5000
 
-# Run the entrypoint script when the container launches
+# Run the app
 CMD ["python", "app.py"]
