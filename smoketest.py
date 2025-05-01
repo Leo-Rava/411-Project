@@ -2,40 +2,38 @@ import requests
 
 
 def run_smoketest():
-    base_url = "http://localhost:5001/api"
-    username = "test"
-    password = "test"
+    base_url = "http://localhost:5001/api" # Changed port to 5001
+    username = "test_user"
+    password = "test_password"
 
-    test_muhammad_ali = {
-        "name": "Muhammad Ali",
-        "weight": 210,
-        "height": 191,
-        "reach": 78,
-        "age": 32
+    test_stock_aapl = {
+        "symbol": "AAPL",
+        "shares": 10
     }
 
-    test_joe_frazier = {
-        "name": "Joe Frazier",
-        "weight": 205,
-        "height": 182,
-        "reach": 73,
-        "age": 30
+    test_stock_msft = {
+        "symbol": "MSFT",
+        "shares": 5
     }
 
+    # Health check
     health_response = requests.get(f"{base_url}/health")
     assert health_response.status_code == 200
     assert health_response.json()["status"] == "success"
+    print("Health check successful")
 
+    # Reset users and stocks
     delete_user_response = requests.delete(f"{base_url}/reset-users")
     assert delete_user_response.status_code == 200
     assert delete_user_response.json()["status"] == "success"
     print("Reset users successful")
 
-    delete_boxer_response = requests.delete(f"{base_url}/reset-boxers")
-    assert delete_boxer_response.status_code == 200
-    assert delete_boxer_response.json()["status"] == "success"
-    print("Reset boxers successful")
+    delete_stocks_response = requests.delete(f"{base_url}/reset-stocks")
+    assert delete_stocks_response.status_code == 200
+    assert delete_stocks_response.json()["status"] == "success"
+    print("Reset stocks successful")
 
+    # Create user
     create_user_response = requests.put(f"{base_url}/create-user", json={
         "username": username,
         "password": password
@@ -55,10 +53,31 @@ def run_smoketest():
     assert login_resp.json()["status"] == "success"
     print("Login successful")
 
-    create_boxer_resp = session.post(f"{base_url}/add-boxer", json=test_muhammad_ali)
-    assert create_boxer_resp.status_code == 201
-    assert create_boxer_resp.json()["status"] == "success"
-    print("Boxer creation successful")
+    # Deposit cash
+    deposit_resp = session.post(f"{base_url}/deposit-cash", json={
+        "amount": 10000.00
+    })
+    assert deposit_resp.status_code == 200
+    assert deposit_resp.json()["status"] == "success"
+    print("Cash deposit successful")
+
+    # Lookup stock (requires authentication)
+    lookup_resp = session.get(f"{base_url}/lookup-stock/AAPL")
+    assert lookup_resp.status_code == 200
+    assert lookup_resp.json()["status"] == "success"
+    print("Stock lookup successful")
+
+    # Buy stock
+    buy_stock_resp = session.post(f"{base_url}/buy-stock", json=test_stock_aapl)
+    assert buy_stock_resp.status_code == 200
+    assert buy_stock_resp.json()["status"] == "success"
+    print("Stock purchase successful")
+
+    # View portfolio
+    portfolio_resp = session.get(f"{base_url}/view-portfolio")
+    assert portfolio_resp.status_code == 200
+    assert portfolio_resp.json()["status"] == "success"
+    print("Portfolio view successful")
 
     # Change password
     change_password_resp = session.post(f"{base_url}/change-password", json={
@@ -77,10 +96,28 @@ def run_smoketest():
     assert login_resp.json()["status"] == "success"
     print("Login with new password successful")
 
-    create_boxer_resp = session.post(f"{base_url}/add-boxer", json=test_joe_frazier)
-    assert create_boxer_resp.status_code == 201
-    assert create_boxer_resp.json()["status"] == "success"
-    print("Boxer creation successful")
+    # Buy another stock
+    buy_stock_resp = session.post(f"{base_url}/buy-stock", json=test_stock_msft)
+    assert buy_stock_resp.status_code == 200
+    assert buy_stock_resp.json()["status"] == "success"
+    print("Second stock purchase successful")
+
+    # Sell stock
+    sell_stock_resp = session.post(f"{base_url}/sell-stock", json={
+        "symbol": "AAPL",
+        "shares": 5
+    })
+    assert sell_stock_resp.status_code == 200
+    assert sell_stock_resp.json()["status"] == "success"
+    print("Stock sale successful")
+
+    # Withdraw cash
+    withdraw_resp = session.post(f"{base_url}/withdraw-cash", json={
+        "amount": 1000.00
+    })
+    assert withdraw_resp.status_code == 200
+    assert withdraw_resp.json()["status"] == "success"
+    print("Cash withdrawal successful")
 
     # Log out
     logout_resp = session.post(f"{base_url}/logout")
@@ -88,11 +125,12 @@ def run_smoketest():
     assert logout_resp.json()["status"] == "success"
     print("Logout successful")
 
-    create_boxer_logged_out_resp = session.post(f"{base_url}/add-boxer", json=test_muhammad_ali)
-    # This should fail because we are logged out
-    assert create_boxer_logged_out_resp.status_code == 401
-    assert create_boxer_logged_out_resp.json()["status"] == "error"
-    print("Boxer creation failed as expected")
+    # Attempt to buy stock while logged out (should fail)
+    buy_stock_logged_out_resp = requests.post(f"{base_url}/buy-stock", json=test_stock_aapl)
+    assert buy_stock_logged_out_resp.status_code == 401
+    assert buy_stock_logged_out_resp.json()["status"] == "error"
+    print("Stock purchase failed as expected when logged out")
+
 
 if __name__ == "__main__":
     run_smoketest()
